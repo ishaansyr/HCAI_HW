@@ -1,1 +1,7 @@
 streamlit
+openai
+PyPDF2
+requests
+bs4
+mistralai
+google.generativeai
