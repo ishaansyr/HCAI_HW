@@ -8,8 +8,8 @@ import google.generativeai as genai
 
 st.title("Homework 3: Chatbot")
 
-provider = st.sidebar.selectbox("LLM Provider", ["OpenAI", "Mistral", "Gemini"], index=0)
-model_tier = st.sidebar.selectbox("Model Tier", ["mini", "regular"], index=0)
+provider = st.sidebar.selectbox("LLM Vendor", ["OpenAI", "Mistral", "Gemini"], index=0)
+model_tier = st.sidebar.selectbox("Model Size", ["mini", "regular"], index=0)
 
 # map provider + tier to concrete model names
 def resolve_model(p: str, tier: str) -> str:
