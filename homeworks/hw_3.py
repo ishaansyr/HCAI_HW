@@ -146,36 +146,58 @@ def update_running_summary_if_needed():
     if summary_content:
         st.session_state.summary = summary_content
 
-# ---------------- Provider call wrappers ----------------
-def call_llm(provider: str, model: str, api_key: str, messages: list[dict]) -> str:
+def call_llm(provider: str, model: str, api_key: str, messages: list[dict]):
     if provider == "OpenAI":
         client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
+        stream = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.7,
+            stream=True,
         )
-        return resp.choices[0].message.content
+        for event in stream:
+            try:
+                delta = event.choices[0].delta.get("content")
+            except Exception:
+                delta = None
+            if delta:
+                yield delta
+        return
 
     if provider == "Mistral":
         client = Mistral(api_key=api_key)
-        resp = client.chat.complete(
+        with client.chat.stream(
             model=model,
             messages=messages,
             temperature=0.7,
-        )
-        return resp.choices[0].message.content
+        ) as stream:
+            for event in stream:
+                text = getattr(event, "delta", None)
+                if not text and hasattr(event, "data"):
+                    text = getattr(event.data, "delta", None) or getattr(event.data, "content", None)
+                if text:
+                    yield text
+        return
 
     if provider == "Gemini":
         genai.configure(api_key=api_key)
         prompt = ""
         for m in messages:
-            prompt += f"{m['role'].upper()}: {m['content']}\n"
-        gmodel = genai.GenerativeModel(model)
-        resp = gmodel.generate_content(prompt)
-        return getattr(resp, "text", "") or (resp.candidates[0].content.parts[0].text if getattr(resp, "candidates", None) else "")
+            role = m.get("role", "user").upper()
+            prompt += f"{role}: {m.get('content','')}\n"
 
-    raise ValueError(f"Unknown provider: {provider}")
+        gmodel = genai.GenerativeModel(model)
+        response = gmodel.generate_content(prompt, stream=True)
+        for chunk in response:
+            if hasattr(chunk, "text") and chunk.text:
+                yield chunk.text
+            else:
+                try:
+                    yield chunk.candidates[0].content.parts[0].text
+                except Exception:
+                    pass
+        return
+
 
 
 for msg in st.session_state.messages:
