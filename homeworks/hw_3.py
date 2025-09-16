@@ -131,7 +131,7 @@ def update_running_summary_if_needed():
             model=model_to_use,
             api_key=api_key,
             messages=[
-                {"role": "system", "content": "You are a precise note-taker."},
+                {"role": "system", "content": "You are a precise summariser."},
                 {"role": "user", "content": summary_prompt + "\n\n" + older_text},
             ],
         )
@@ -140,13 +140,8 @@ def update_running_summary_if_needed():
         st.session_state.summary = summary_content
 
 def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict], debug: bool = False):
-    """
-    Yield incremental text chunks from the selected provider.
-    Set debug=True to print raw streaming events in the app.
-    """
 
     if provider == "OpenAI":
-        from openai import OpenAI
         client = OpenAI(api_key=api_key)
         stream = client.chat.completions.create(
             model=model,
@@ -161,7 +156,6 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
         return
 
     if provider == "Mistral":
-        from mistralai import Mistral
         client = Mistral(api_key=api_key)
         with client.chat.stream(
             model=model,
@@ -179,9 +173,7 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
         return
 
     if provider == "Gemini":
-        import google.generativeai as genai
         genai.configure(api_key=api_key)
-        # Convert chat-style messages to plain prompt
         prompt = ""
         for m in messages:
             role = m.get("role", "user").upper()
