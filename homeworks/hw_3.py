@@ -173,17 +173,23 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
         gmodel = genai.GenerativeModel(model)
         response = gmodel.generate_content(prompt, stream=True)
         for chunk in response:
-            if debug: st.write(chunk)
-            if hasattr(chunk, "text") and chunk.text:
-                yield chunk.text
-            else:
-                try:
-                    for part in chunk.candidates[0].content.parts:
-                        if part.text: 
-                            yield part.text
-                except Exception:
-                    pass
+            if debug:
+                st.write(chunk)
+            # Try safe access to streamed text
+            try:
+                if hasattr(chunk, "text") and chunk.text:
+                    yield chunk.text
+                else:
+                    if (hasattr(chunk, "candidates") and chunk.candidates and
+                        hasattr(chunk.candidates[0], "content") and chunk.candidates[0].content.parts):
+                        for part in chunk.candidates[0].content.parts:
+                            if hasattr(part, "text") and part.text:
+                                yield part.text
+            except Exception:
+                # Ignore empty finish chunks
+                continue
         return
+
 
     raise ValueError(f"Unknown provider: {provider}")
 
