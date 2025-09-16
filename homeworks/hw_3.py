@@ -11,7 +11,7 @@ model_tier = st.sidebar.selectbox("Model Size", ["mini", "regular"], index=0)
 
 def resolve_model(p: str, tier: str) -> str:
     if p == "OpenAI":
-        return "gpt-4o-mini" if tier == "mini" else "gpt-4o"
+        return "gpt-5-nano" if tier == "mini" else "gpt-4o"
     if p == "Mistral":
         return "mistral-small-latest" if tier == "mini" else "mistral-medium-latest"
     if p == "Gemini":
@@ -139,8 +139,14 @@ def update_running_summary_if_needed():
     if summary_content:
         st.session_state.summary = summary_content
 
-def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict]):
+def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict], debug: bool = False):
+    """
+    Yield incremental text chunks from the selected provider.
+    Set debug=True to print raw streaming events in the app.
+    """
+
     if provider == "OpenAI":
+        from openai import OpenAI
         client = OpenAI(api_key=api_key)
         stream = client.chat.completions.create(
             model=model,
@@ -149,15 +155,14 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
             stream=True,
         )
         for event in stream:
-            try:
-                delta = event.choices[0].delta.get("content")
-            except Exception:
-                delta = None
-            if delta:
-                yield delta
+            if debug:
+                st.write(event)  # raw event from API
+            if event.choices and event.choices[0].delta and event.choices[0].delta.content:
+                yield event.choices[0].delta.content
         return
 
     if provider == "Mistral":
+        from mistralai import Mistral
         client = Mistral(api_key=api_key)
         with client.chat.stream(
             model=model,
@@ -165,6 +170,8 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
             temperature=0.7,
         ) as stream:
             for event in stream:
+                if debug:
+                    st.write(event)
                 text = getattr(event, "delta", None)
                 if not text and hasattr(event, "data"):
                     text = getattr(event.data, "delta", None) or getattr(event.data, "content", None)
@@ -173,13 +180,18 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
         return
 
     if provider == "Gemini":
+        import google.generativeai as genai
         genai.configure(api_key=api_key)
+        # Convert chat-style messages to plain prompt
         prompt = ""
         for m in messages:
-            prompt += f"{m.get('role','user').upper()}: {m.get('content','')}\n"
+            role = m.get("role", "user").upper()
+            prompt += f"{role}: {m.get('content','')}\n"
         gmodel = genai.GenerativeModel(model)
         response = gmodel.generate_content(prompt, stream=True)
         for chunk in response:
+            if debug:
+                st.write(chunk)
             if hasattr(chunk, "text") and chunk.text:
                 yield chunk.text
             else:
@@ -190,6 +202,7 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
         return
 
     raise ValueError(f"Unknown provider: {provider}")
+
 
 def consume_stream(generator) -> str:
     out = ""
