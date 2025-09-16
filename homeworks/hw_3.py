@@ -151,7 +151,6 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
         stream = client.chat.completions.create(
             model=model,
             messages=messages,
-            temperature=0.7,
             stream=True,
         )
         for event in stream:
