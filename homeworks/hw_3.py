@@ -140,7 +140,6 @@ def update_running_summary_if_needed():
         st.session_state.summary = summary_content
 
 def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict], debug: bool = False):
-
     if provider == "OpenAI":
         client = OpenAI(api_key=api_key)
         stream = client.chat.completions.create(
@@ -149,50 +148,41 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
             stream=True,
         )
         for event in stream:
-            if debug:
-                st.write(event)  # raw event from API
+            if debug: st.write(event)
             if event.choices and event.choices[0].delta and event.choices[0].delta.content:
                 yield event.choices[0].delta.content
         return
 
     if provider == "Mistral":
         client = Mistral(api_key=api_key)
-        with client.chat.stream(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-        ) as stream:
+        with client.chat.stream(model=model, messages=messages) as stream:
             for event in stream:
-                if debug:
-                    st.write(event)
-                text = getattr(event, "delta", None)
-                if not text and hasattr(event, "data"):
-                    text = getattr(event.data, "delta", None) or getattr(event.data, "content", None)
-                if text:
-                    yield text
+                if debug: st.write(event)
+                # handle message_delta events
+                if hasattr(event, "delta") and event.delta:
+                    yield event.delta
         return
 
     if provider == "Gemini":
         genai.configure(api_key=api_key)
-        prompt = ""
-        for m in messages:
-            role = m.get("role", "user").upper()
-            prompt += f"{role}: {m.get('content','')}\n"
+        prompt = "".join(f"{m['role'].upper()}: {m['content']}\n" for m in messages)
         gmodel = genai.GenerativeModel(model)
         response = gmodel.generate_content(prompt, stream=True)
         for chunk in response:
-            if debug:
-                st.write(chunk)
+            if debug: st.write(chunk)
             if hasattr(chunk, "text") and chunk.text:
                 yield chunk.text
             else:
                 try:
-                    yield chunk.candidates[0].content.parts[0].text
+                    for part in chunk.candidates[0].content.parts:
+                        if part.text: 
+                            yield part.text
                 except Exception:
                     pass
         return
 
     raise ValueError(f"Unknown provider: {provider}")
+
 
 
 def consume_stream(generator) -> str:
