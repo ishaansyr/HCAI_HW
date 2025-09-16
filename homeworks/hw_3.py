@@ -5,13 +5,10 @@ from mistralai import Mistral
 from openai import OpenAI
 import google.generativeai as genai
 
-
 st.title("Homework 3: Chatbot")
-
 provider = st.sidebar.selectbox("LLM Vendor", ["OpenAI", "Mistral", "Gemini"], index=0)
 model_tier = st.sidebar.selectbox("Model Size", ["mini", "regular"], index=0)
 
-# map provider + tier to concrete model names
 def resolve_model(p: str, tier: str) -> str:
     if p == "OpenAI":
         return "gpt-4o-mini" if tier == "mini" else "gpt-4o"
@@ -19,22 +16,20 @@ def resolve_model(p: str, tier: str) -> str:
         return "mistral-small-latest" if tier == "mini" else "mistral-medium-latest"
     if p == "Gemini":
         return "gemini-2.5-flash-lite" if tier == "mini" else "gemini-2.5-flash"
+    raise ValueError(f"Unknown provider: {p}")
 
 model_to_use = resolve_model(provider, model_tier)
 
-# memory policy
 memory_mode = st.sidebar.selectbox(
     "Memory Mode",
     ["Buffer: 6 questions", "Buffer: 2,000 tokens", "Conversation summary"],
     index=0,
 )
 
-# two optional URLs to prime context
-url1 = st.sidebar.text_input("Context URL 1 (optional)")
-url2 = st.sidebar.text_input("Context URL 2 (optional)")
-fetch_btn = st.sidebar.button("Fetch URLs")
+url1 = st.sidebar.text_input("Context URL 1")
+url2 = st.sidebar.text_input("Context URL 2")
+fetch_btn = st.sidebar.button("Fetch URL(s)")
 
-# ---------------- Secrets ----------------
 def get_api_key(p: str) -> str | None:
     try:
         return st.secrets[f"{p.upper()}_API_KEY"]
@@ -43,29 +38,28 @@ def get_api_key(p: str) -> str | None:
 
 api_key = get_api_key(provider)
 if not api_key:
-    st.error(f"Missing API key for {provider}. Add it to secrets as either [{provider.lower()}].api_key or {provider.upper()}_API_KEY.")
+    st.error(f"Missing API key for {provider}. Add {provider.upper()}_API_KEY to secrets.")
     st.stop()
 
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "How can I help you?"}]
-if "info_stage" not in st.session_state:
-    st.session_state.info_stage = 0
 if "context_blobs" not in st.session_state:
-    st.session_state.context_blobs = []  # fetched URL texts
+    st.session_state.context_blobs = []
 if "summary" not in st.session_state:
-    st.session_state.summary = ""  # running conversation summary, if used
+    st.session_state.summary = ""
 
 def fetch_url_text(url: str, max_chars: int = 20000) -> str | None:
     if not url:
         return None
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=10)  # headers optional
         r.raise_for_status()
         soup = BeautifulSoup(r.content, "html.parser")
         text = soup.get_text(separator="\n")
         return text[:max_chars]
     except requests.RequestException as e:
         st.warning(f"Could not fetch {url}: {e}")
+        return None
 
 if fetch_btn:
     blobs = []
@@ -101,14 +95,12 @@ def trim_messages_by_policy(history: list[dict]) -> list[dict]:
                 keep_idxs.add(i)
                 if i + 1 < len(history) and history[i + 1]["role"] == "assistant":
                     keep_idxs.add(i + 1)
-        keep_idxs.add(0)
-        trimmed = [m for i, m in enumerate(history) if i in sorted(keep_idxs)]
-        return trimmed
+        keep_idxs.add(0)  # keep initial greeting
+        return [m for i, m in enumerate(history) if i in sorted(keep_idxs)]
 
     if memory_mode == "Buffer: 2,000 tokens":
         budget = 2000
-        kept = []
-        total = 0
+        kept, total = [], 0
         for m in reversed(history):
             t = approx_token_count(m["content"])
             if total + t > budget and kept:
@@ -116,6 +108,7 @@ def trim_messages_by_policy(history: list[dict]) -> list[dict]:
             kept.append(m)
             total += t
         return list(reversed(kept))
+
     return history[-6:]
 
 def update_running_summary_if_needed():
@@ -127,26 +120,26 @@ def update_running_summary_if_needed():
     older = st.session_state.messages[:-6]
     older_text = ""
     for m in older:
-        role = m["role"]
-        older_text += f"{role.upper()}: {m['content']}\n"
+        older_text += f"{m['role'].upper()}: {m['content']}\n"
     summary_prompt = (
-        "Summarise the prior conversation in 5 bullets capturing user goals, "
+        "Summarise the prior conversation in 5 concise bullets capturing user goals, "
         "constraints, decisions, and unresolved items. No fluff."
     )
-
-    summary_content = call_llm(
-        provider=provider,
-        model=model_to_use,
-        api_key=api_key,
-        messages=[
-            {"role": "system", "content": "You are a precise note-taker."},
-            {"role": "user", "content": summary_prompt + "\n\n" + older_text},
-        ],
+    summary_content = consume_stream(
+        call_llm_stream(
+            provider=provider,
+            model=model_to_use,
+            api_key=api_key,
+            messages=[
+                {"role": "system", "content": "You are a precise note-taker."},
+                {"role": "user", "content": summary_prompt + "\n\n" + older_text},
+            ],
+        )
     )
     if summary_content:
         st.session_state.summary = summary_content
 
-def call_llm(provider: str, model: str, api_key: str, messages: list[dict]):
+def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict]):
     if provider == "OpenAI":
         client = OpenAI(api_key=api_key)
         stream = client.chat.completions.create(
@@ -183,9 +176,7 @@ def call_llm(provider: str, model: str, api_key: str, messages: list[dict]):
         genai.configure(api_key=api_key)
         prompt = ""
         for m in messages:
-            role = m.get("role", "user").upper()
-            prompt += f"{role}: {m.get('content','')}\n"
-
+            prompt += f"{m.get('role','user').upper()}: {m.get('content','')}\n"
         gmodel = genai.GenerativeModel(model)
         response = gmodel.generate_content(prompt, stream=True)
         for chunk in response:
@@ -198,7 +189,13 @@ def call_llm(provider: str, model: str, api_key: str, messages: list[dict]):
                     pass
         return
 
+    raise ValueError(f"Unknown provider: {provider}")
 
+def consume_stream(generator) -> str:
+    out = ""
+    for delta in generator:
+        out += delta
+    return out
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -211,35 +208,18 @@ if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
-    if st.session_state.info_stage == 1 and user_input.strip().lower() == "yes":
-        prompt = "Please expand with more detail. Build on the last answer, do not repeat the same information. If you don't know the answer, just say so"
-        st.session_state.info_stage = 2
-    elif st.session_state.info_stage == 2 and user_input.strip().lower() == "yes":
-        prompt = "Please expand with even more detail. Build on the last 2 answers, do not repeat the same information"
-        st.session_state.info_stage = 0
-    elif st.session_state.info_stage in [1, 2] and user_input.strip().lower() != "yes":
-        prompt = "What can I help you with?"
-        st.session_state.info_stage = 0
-    else:
-        prompt = user_input
-        st.session_state.info_stage = 1
-
+    prompt = user_input  
     base_history = st.session_state.messages + [{"role": "user", "content": prompt}]
     trimmed_history = trim_messages_by_policy(base_history)
     final_messages = build_context_messages() + trimmed_history
 
     with st.chat_message("assistant"):
         with st.spinner(f"Thinking with {provider} · {model_to_use}..."):
-            reply = call_llm(provider, model_to_use, api_key, final_messages)
-            st.markdown(reply if reply else "_No response_")
-
+            placeholder = st.empty()
+            reply = ""
+            for delta in call_llm_stream(provider, model_to_use, api_key, final_messages):
+                reply += delta
+                placeholder.markdown(reply if reply else "_No response_")
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
-
     update_running_summary_if_needed()
-
-    if st.session_state.info_stage in [1, 2]:
-        follow_up = "DO YOU WANT MORE INFO?"
-        st.session_state.messages.append({"role": "assistant", "content": follow_up})
-        with st.chat_message("assistant"):
-            st.markdown(follow_up)
