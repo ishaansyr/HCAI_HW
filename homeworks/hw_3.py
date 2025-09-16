@@ -152,18 +152,21 @@ def call_llm_stream(provider: str, model: str, api_key: str, messages: list[dict
             if event.choices and event.choices[0].delta and event.choices[0].delta.content:
                 yield event.choices[0].delta.content
         return
+    
     if provider == "Mistral":
         client = Mistral(api_key=api_key)
         with client.chat.stream(model=model, messages=messages) as stream:
             for event in stream:
                 if debug:
-                    st.write(event)
-                if event.type == "message_delta" and hasattr(event.data, "delta"):
-                    delta = event.data.delta
-                    if delta:
-                        yield delta
+                    st.write(event)  # inspect raw event
+                try:
+                    delta = event.data.choices[0].delta.content
+                except Exception:
+                    delta = None
+                if delta:
+                    yield delta
         return
-    
+ 
     if provider == "Gemini":
         genai.configure(api_key=api_key)
         prompt = "".join(f"{m['role'].upper()}: {m['content']}\n" for m in messages)
