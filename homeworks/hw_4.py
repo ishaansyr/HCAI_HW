@@ -99,7 +99,6 @@ def trim_history(history, max_pairs=5):
     cutoff = user_idxs[-max_pairs]
     return history[cutoff:]
 
-# ------------------ Chat Interface ------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -126,15 +125,14 @@ if user_input:
     # Prompt construction
     system_prompt = (
         "You are a chatbot for Syracuse University student organizations. "
-        "If relevant context is provided, cite it clearly and explain you are using knowledge base (RAG). "
-        "If not, answer from your own reasoning. Clearly state if your response is from your own reasoning or the knowledge base"
+        "Whenever the user asks about organizations they can join, always give an exhaustive list from the knowledge base"
+        "Stick to the knowlege base as much as possible"
     )
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Question: {user_input}\n\nContext from knowledge base:\n{context_text}"}
     ]
 
-    # ------------------ Call LLM ------------------
     reply = ""
     if provider == "OpenAI":
         client = OpenAI(api_key=api_key)
