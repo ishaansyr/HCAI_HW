@@ -2,11 +2,9 @@ streamlit
 openai
 PyPDF2
 requests
-bs4
+beautifulsoup4
 mistralai
-google.generativeai
-os
-glob
+google-generativeai
 chromadb
-protobuf == 3.20
+protobuf>=3.20,<5
 pysqlite3-binary
