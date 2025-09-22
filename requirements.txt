@@ -5,3 +5,8 @@ requests
 bs4
 mistralai
 google.generativeai
+os
+glob
+chromadb
+protobuf == 3.20
+pysqlite3-binary
