@@ -32,7 +32,7 @@ if not api_key:
     st.error(f"Missing API key for {provider}. Add {provider.upper()}_API_KEY to secrets.")
     st.stop()
 
-CHROMA_DB_PATH = "./ChromaDB_su_orgs"
+CHROMA_DB_PATH = "./ChromaDB_su_orgs"   # permanent folder
 COLLECTION_NAME = "SUOrgsCollection"
 
 def semantic_chunking(html_text):
@@ -42,33 +42,31 @@ def semantic_chunking(html_text):
     If it was possible for each html page to be a chunk, I would have preferred that instead.
     """
     soup = BeautifulSoup(html_text, "html.parser")
-
-    # Collect text from semantic elements
     sections = [
         el.get_text(" ", strip=True)
         for el in soup.find_all(["p", "h1", "h2", "h3", "li"])
     ]
-
-    # Keep only non-empty chunks
-    chunks = [sec for sec in sections if sec]
-
-    return chunks
-
+    return [sec for sec in sections if sec]
 
 def build_vectordb():
-    if os.path.exists(CHROMA_DB_PATH):
-        chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-        return chroma_client.get_or_create_collection(COLLECTION_NAME)
-
-    st.write("⚡ Building vector DB from su_orgs HTML files…")
+    # Create persistent client
     chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     collection = chroma_client.get_or_create_collection(COLLECTION_NAME)
 
+    # If the collection is already populated, skip rebuild
+    if collection.count() > 0:
+        st.info("Reusing existing vector DB ✅")
+        return collection
+
+    # Otherwise, build it from HTML files
+    st.write("⚡ Building vector DB from su_orgs HTML files…")
     openai_client = st.session_state.openai_client
+
     html_files = glob.glob("su_orgs/*.html")
     for filepath in html_files:
         with open(filepath, "r", encoding="utf-8") as f:
             html_text = f.read()
+
         chunks = semantic_chunking(html_text)
         for i, chunk in enumerate(chunks):
             resp = openai_client.embeddings.create(
@@ -83,8 +81,10 @@ def build_vectordb():
                 embeddings=[embedding],
                 metadatas=[{"filename": os.path.basename(filepath), "chunk": i}]
             )
-    st.success("Vector DB built ✅")
+
+    st.success("Vector DB built and stored permanently ✅")
     return collection
+
 
 collection = build_vectordb()
 
